@@ -119,7 +119,8 @@
     "flip-card": {
       "front-title": "Saldo Total",
       "back-title": "Transforme seu dispositivo em uma verdadeira carteira de hardware"
-    }
+    },
+    "sync-warning": "O saldo total pode estar incompleto"
   },
   "account-add": {
     "featured": "Destaque",

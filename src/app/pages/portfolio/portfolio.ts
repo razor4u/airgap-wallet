@@ -1,13 +1,14 @@
 import { Component } from '@angular/core'
 import { Router } from '@angular/router'
 import { AirGapMarketWallet } from '@airgap/coinlib-core'
-import { forkJoin, from, Observable, Subscription } from 'rxjs'
+import { Observable, Subscription } from 'rxjs'
 import { Platform } from '@ionic/angular'
 
 import { ProtocolService } from '@airgap/angular-core'
 import BigNumber from 'bignumber.js'
 import { AirGapWalletStatus } from '@airgap/coinlib-core/wallet/AirGapWallet'
-import { map, take } from 'rxjs/operators'
+import { map } from 'rxjs/operators'
+import { promiseTimeout } from '../../helpers/promise'
 import { ShopService } from 'src/app/services/shop/shop.service'
 import { CryptoToFiatPipe } from '../../pipes/crypto-to-fiat/crypto-to-fiat.pipe'
 import { AccountProvider, MainWalletGroup } from '../../services/account/account.provider'
@@ -23,6 +24,7 @@ import { WalletStorageKey, WalletStorageService } from '../../services/storage/s
 })
 export class PortfolioPage {
   public isVisible: boolean = false
+  public syncWarningNames: string[] = []
 
   public total: number = 0
   public changePercentage: number = 0
@@ -138,28 +140,33 @@ export class PortfolioPage {
   }
 
   public async doRefresh(event: any = null) {
-    // XTZ: Refresh delegation status
     this.operationsProvider.refreshAllDelegationStatuses(this.walletsProvider.getActiveWalletList())
 
-    const observables = [
-      this.walletsProvider.getActiveWalletList().map((wallet) => {
-        return from(wallet.synchronize())
-      })
-    ]
-    /**
-     * if we use await Promise.all() instead, then each wallet
-     * is synchronized asynchronously, leading to blocking behaviour.
-     * Instead we want to synchronize all wallets simultaneously
-     */
-    const allWalletsSynced = forkJoin([observables])
+    this.syncWarningNames = []
+    const SYNC_TIMEOUT_MS = 10000
 
-    allWalletsSynced.pipe(take(1)).subscribe(() => {
-      this.calculateTotal(this.walletsProvider.getActiveWalletList(), event ? event.target : null)
-    })
+    const wallets = this.walletsProvider.getActiveWalletList()
+
+    const results = await Promise.all(
+      wallets.map((wallet) =>
+        promiseTimeout(SYNC_TIMEOUT_MS, wallet.synchronize())
+          .then(() => ({ success: true, name: '' }))
+          .catch((error) => {
+            handleErrorSentry(ErrorCategory.COINLIB)(error)
+            return { success: false, name: wallet.protocol.name }
+          })
+      )
+    )
+
+    const failed = results.filter((r) => !r.success)
+    if (failed.length > 0) {
+      this.syncWarningNames = [...new Set(failed.map((r) => r.name))]
+    }
+
+    this.calculateTotal(this.walletsProvider.getActiveWalletList(), event ? event.target : null)
   }
 
   public async calculateTotal(wallets: AirGapMarketWallet[], refresher: any = null): Promise<void> {
-    this.isVisible = false
     const cryptoToFiatPipe = new CryptoToFiatPipe(this.protocolService)
     wallets = wallets.filter((wallet) => wallet.status === AirGapWalletStatus.ACTIVE)
     this.total = (
@@ -172,7 +179,7 @@ export class PortfolioPage {
         )
       )
     )
-      .reduce((sum: BigNumber, next: string) => sum.plus(next), new BigNumber(0))
+      .reduce((sum: BigNumber, next: string) => (next !== '' ? sum.plus(next) : sum), new BigNumber(0))
       .toNumber()
 
     if (refresher) {
