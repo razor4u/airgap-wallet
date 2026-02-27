@@ -69,6 +69,10 @@ export class AccountTransactionListPage {
   public balance: BigNumber | undefined
 
   public transactions: IAirGapTransaction[] = []
+  public filteredTransactions: IAirGapTransaction[] = []
+  public isSearchOpen: boolean = false
+  public searchTerm: string = ''
+  public isLoadingAllTransactions: boolean = false
 
   public protocolIdentifier: string
 
@@ -277,6 +281,7 @@ export class AccountTransactionListPage {
     )
 
     this.transactions = this.transactions.concat(newTransactions)
+    this.applyFilter()
 
     await this.storageProvider.setCache<IAirGapTransaction[]>(
       await this.accountProvider.getAccountIdentifier(this.wallet),
@@ -303,6 +308,7 @@ export class AccountTransactionListPage {
           0,
           10
         ) ?? []
+      this.applyFilter()
     }
 
     const transactionPromise: Promise<IAirGapTransaction[]> = this.getTransactions(undefined, this.TRANSACTION_LIMIT)
@@ -316,6 +322,7 @@ export class AccountTransactionListPage {
 
     if (transactions.length > 0) {
       this.transactions = transactions
+      this.applyFilter()
     }
 
     this.isRefreshing = false
@@ -435,6 +442,73 @@ export class AccountTransactionListPage {
 
   private async getMultisigWeights() {
     this.multisigWeightsDetails = await this.operationsProvider.getStellarMustisigWeights(this.wallet)
+  }
+
+  public toggleSearch(): void {
+    this.isSearchOpen = !this.isSearchOpen
+    if (!this.isSearchOpen) {
+      this.searchTerm = ''
+      this.filteredTransactions = this.transactions
+    }
+  }
+
+  public filterTransactions(): void {
+    this.applyFilter()
+  }
+
+  public onSearchSubmit(): void {
+    this.applyFilter()
+    if (this.searchTerm && this.searchTerm.trim() !== '' && this.infiniteEnabled && !this.isLoadingAllTransactions) {
+      this.loadAllForSearch()
+    }
+  }
+
+  private applyFilter(): void {
+    if (!this.searchTerm || this.searchTerm.trim() === '') {
+      this.filteredTransactions = this.transactions
+      return
+    }
+    const term: string = this.searchTerm.toLowerCase().trim()
+    this.filteredTransactions = this.transactions.filter((tx: IAirGapTransaction) => {
+      const hashMatch: boolean = tx.hash ? tx.hash.toLowerCase().includes(term) : false
+      const fromMatch: boolean = tx.from ? tx.from.some((addr: string) => addr.toLowerCase().includes(term)) : false
+      const toMatch: boolean = tx.to ? tx.to.some((addr: string) => addr.toLowerCase().includes(term)) : false
+      return hashMatch || fromMatch || toMatch
+    })
+  }
+
+  private async loadAllForSearch(): Promise<void> {
+    this.isLoadingAllTransactions = true
+    const seen: Set<string> = new Set(this.transactions.map((tx: IAirGapTransaction) => this.txKey(tx)))
+    while (this.infiniteEnabled && this.isSearchOpen && this.searchTerm.trim() !== '') {
+      const newTransactions: IAirGapTransaction[] = await this.getTransactions(
+        this.transactionResult ? this.transactionResult.cursor : undefined,
+        this.TRANSACTION_LIMIT
+      )
+      const uniqueNew: IAirGapTransaction[] = newTransactions.filter((tx: IAirGapTransaction) => {
+        const key: string = this.txKey(tx)
+        if (seen.has(key)) {
+          return false
+        }
+        seen.add(key)
+        return true
+      })
+      if (uniqueNew.length === 0) {
+        break
+      }
+      this.transactions = this.transactions.concat(uniqueNew)
+      this.applyFilter()
+      await this.storageProvider.setCache<IAirGapTransaction[]>(
+        await this.accountProvider.getAccountIdentifier(this.wallet),
+        this.transactions
+      )
+      this.infiniteEnabled = newTransactions.length >= this.TRANSACTION_LIMIT
+    }
+    this.isLoadingAllTransactions = false
+  }
+
+  private txKey(tx: IAirGapTransaction): string {
+    return `${tx.hash || ''}_${tx.from?.join(',') || ''}_${tx.to?.join(',') || ''}_${tx.amount}_${tx.timestamp || ''}`
   }
 
   public ngOnDestroy(): void {
