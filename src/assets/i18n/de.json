@@ -119,7 +119,8 @@
     "flip-card": {
       "front-title": "Gesamtsaldo",
       "back-title": "Verwandeln Sie Ihr Gerät in eine echte Hardware-Wallet"
-    }
+    },
+    "sync-warning": "Gesamtsaldo möglicherweise unvollständig"
   },
   "account-add": {
     "featured": "Empfohlen",
