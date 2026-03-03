@@ -56,17 +56,33 @@
       [wallet]="wallet"
     ></transaction-list>
 
-    <ion-row class="ion-align-items-center ion-padding-top">
-      <ion-col size="10" class="ion-padding-horizontal">
-        <ion-text class="font--weight__bold" color="primary">
-          <p>{{ 'account-transaction-list.transactions_label' | translate }}</p>
-        </ion-text>
+    <ion-row class="ion-align-items-center ion-padding-top tx-header-row">
+      <ion-col class="ion-padding-horizontal tx-header-col">
+        <div class="tx-header">
+          <ion-text class="font--weight__bold" color="primary" [class.hidden]="isSearchOpen">
+            <p class="ion-no-margin">{{ 'account-transaction-list.transactions_label' | translate }}</p>
+          </ion-text>
+          <div class="tx-search-container" [class.open]="isSearchOpen">
+            <ion-input
+              *ngIf="isSearchOpen"
+              class="tx-search-input"
+              type="search"
+              enterkeyhint="search"
+              placeholder="Search by hash or address"
+              [(ngModel)]="searchTerm"
+              (ngModelChange)="filterTransactions()"
+              (keyup.enter)="onSearchSubmit()"
+              [autofocus]="true"
+            ></ion-input>
+          </div>
+          <div class="tx-header-actions">
+            <ion-spinner *ngIf="(isRefreshing && !showLinkToBlockExplorer) || isLoadingAllTransactions" color="primary" name="dots"></ion-spinner>
+            <ion-button fill="clear" size="small" (click)="toggleSearch()" color="primary">
+              <ion-icon slot="icon-only" [name]="isSearchOpen ? 'close-outline' : 'search-outline'"></ion-icon>
+            </ion-button>
+          </div>
+        </div>
       </ion-col>
-
-      <ion-col size="1" class="justify--content__end ion-no-padding">
-        <ion-spinner *ngIf="isRefreshing && !showLinkToBlockExplorer" color="primary" name="dots"></ion-spinner>
-      </ion-col>
-      <ion-col size="1"></ion-col>
     </ion-row>
 
     <ion-row *ngIf="showLinkToBlockExplorer">
@@ -85,7 +101,7 @@
 
     <transaction-list
       [transactionType]="'normalTransaction'"
-      [transactions]="transactions"
+      [transactions]="filteredTransactions"
       [isRefreshing]="isRefreshing"
       [initialTransactionsLoaded]="initialTransactionsLoaded"
       [wallet]="wallet"
