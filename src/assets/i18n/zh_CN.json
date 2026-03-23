@@ -119,7 +119,8 @@
       "flip-card": {
         "front-title": "总余额",
         "back-title": "将您的设备变成真正的硬件钱包"
-      }
+      },
+      "sync-warning": "总余额可能不完整"
     },
     "account-add": {
       "featured": "精选",

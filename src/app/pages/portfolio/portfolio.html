@@ -18,7 +18,7 @@
           <span>{{ 'portfolio.flip-card.front-title' | translate }}</span>
           <div class="balance-row">
             <ng-container *ngIf="!isBalanceHidden">
-              <ng-container *ngIf="isVisible && total > 0; else skeletonBalance">
+              <ng-container *ngIf="isVisible; else skeletonBalance">
                 <h1 [ngClass]="total < 1000000 ? 'large-font': 'small-font'">{{ '' | fiatCurrencySymbol }}{{ total | number: '1.2-2' }}</h1>
               </ng-container>
               <ng-template #skeletonBalance>
@@ -33,6 +33,10 @@
             <ion-button fill="clear" size="small" (click)="toggleBalanceVisibility()" class="balance-toggle-btn">
               <ion-icon [name]="isBalanceHidden ? 'eye-outline' : 'eye-off-outline'" slot="icon-only"></ion-icon>
             </ion-button>
+          </div>
+          <div *ngIf="syncWarningNames.length > 0" class="sync-warning">
+            <ion-icon name="alert-circle-outline"></ion-icon>
+            <span>{{ 'portfolio.sync-warning' | translate }}</span>
           </div>
         </div>
         <!-- </flip-card-front> -->

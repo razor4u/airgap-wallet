@@ -119,7 +119,8 @@
       "flip-card": {
         "front-title": "Solde total",
         "back-title": "Transformez votre appareil en un véritable portefeuille matériel"
-      }
+      },
+      "sync-warning": "Le solde total peut être incomplet"
     },
     "account-add": {
       "featured": "En vedette",

@@ -1,13 +1,14 @@
-import { Component } from '@angular/core'
+import { ChangeDetectorRef, Component, NgZone } from '@angular/core'
 import { Router } from '@angular/router'
 import { AirGapMarketWallet } from '@airgap/coinlib-core'
-import { forkJoin, from, Observable, Subscription } from 'rxjs'
+import { Observable, Subscription } from 'rxjs'
 import { Platform } from '@ionic/angular'
 
 import { ProtocolService } from '@airgap/angular-core'
 import BigNumber from 'bignumber.js'
 import { AirGapWalletStatus } from '@airgap/coinlib-core/wallet/AirGapWallet'
-import { map, take } from 'rxjs/operators'
+import { map } from 'rxjs/operators'
+import { promiseTimeout } from '../../helpers/promise'
 import { ShopService } from 'src/app/services/shop/shop.service'
 import { CryptoToFiatPipe } from '../../pipes/crypto-to-fiat/crypto-to-fiat.pipe'
 import { AccountProvider, MainWalletGroup } from '../../services/account/account.provider'
@@ -23,6 +24,7 @@ import { WalletStorageKey, WalletStorageService } from '../../services/storage/s
 })
 export class PortfolioPage {
   public isVisible: boolean = false
+  public syncWarningNames: string[] = []
 
   public total: number = 0
   public changePercentage: number = 0
@@ -55,7 +57,9 @@ export class PortfolioPage {
     private readonly protocolService: ProtocolService,
     public platform: Platform,
     private readonly shopService: ShopService,
-    private readonly storageService: WalletStorageService
+    private readonly storageService: WalletStorageService,
+    private readonly ngZone: NgZone,
+    private readonly cdr: ChangeDetectorRef
   ) {
     this.isDesktop = !this.platform.is('hybrid')
 
@@ -138,42 +142,109 @@ export class PortfolioPage {
   }
 
   public async doRefresh(event: any = null) {
-    // XTZ: Refresh delegation status
     this.operationsProvider.refreshAllDelegationStatuses(this.walletsProvider.getActiveWalletList())
 
-    const observables = [
-      this.walletsProvider.getActiveWalletList().map((wallet) => {
-        return from(wallet.synchronize())
-      })
-    ]
-    /**
-     * if we use await Promise.all() instead, then each wallet
-     * is synchronized asynchronously, leading to blocking behaviour.
-     * Instead we want to synchronize all wallets simultaneously
-     */
-    const allWalletsSynced = forkJoin([observables])
-
-    allWalletsSynced.pipe(take(1)).subscribe(() => {
-      this.calculateTotal(this.walletsProvider.getActiveWalletList(), event ? event.target : null)
-    })
-  }
-
-  public async calculateTotal(wallets: AirGapMarketWallet[], refresher: any = null): Promise<void> {
+    this.syncWarningNames = []
+    this.total = 0
     this.isVisible = false
+
+    const SYNC_TIMEOUT_MS = 10000
+    const wallets = this.walletsProvider.getActiveWalletList().filter((wallet) => wallet.status === AirGapWalletStatus.ACTIVE)
+
     const cryptoToFiatPipe = new CryptoToFiatPipe(this.protocolService)
-    wallets = wallets.filter((wallet) => wallet.status === AirGapWalletStatus.ACTIVE)
-    this.total = (
-      await Promise.all(
-        wallets.map((wallet) =>
-          cryptoToFiatPipe.transform(wallet.getCurrentBalance(), {
+    const failedNames: Set<string> = new Set()
+
+    await Promise.all(
+      wallets.map(async (wallet) => {
+        try {
+          await promiseTimeout(SYNC_TIMEOUT_MS, wallet.synchronize())
+        } catch (error) {
+          handleErrorSentry(ErrorCategory.COINLIB)(error)
+          failedNames.add(wallet.protocol.name)
+        }
+
+        try {
+          if (wallet.getCurrentMarketPrice() === undefined || wallet.getCurrentMarketPrice()?.isNaN()) {
+            await wallet.fetchCurrentMarketPrice()
+          }
+
+          const fiatValue = await cryptoToFiatPipe.transform(wallet.getCurrentBalance(), {
             protocolIdentifier: wallet.protocol.identifier,
             currentMarketPrice: wallet.getCurrentMarketPrice()
           })
-        )
-      )
+
+          if (fiatValue !== '') {
+            this.ngZone.run(() => {
+              this.total = new BigNumber(this.total).plus(fiatValue).toNumber()
+              this.isVisible = true
+              this.syncWarningNames = [...failedNames]
+              this.cdr.detectChanges()
+            })
+          } else {
+            failedNames.add(wallet.protocol.name)
+            this.ngZone.run(() => {
+              this.isVisible = true
+              this.syncWarningNames = [...failedNames]
+              this.cdr.detectChanges()
+            })
+          }
+        } catch {
+          failedNames.add(wallet.protocol.name)
+          this.ngZone.run(() => {
+            this.isVisible = true
+            this.syncWarningNames = [...failedNames]
+            this.cdr.detectChanges()
+          })
+        }
+      })
     )
-      .reduce((sum: BigNumber, next: string) => sum.plus(next), new BigNumber(0))
-      .toNumber()
+
+    if (event?.target) {
+      event.target.complete()
+    }
+  }
+
+  public async calculateTotal(wallets: AirGapMarketWallet[], refresher: any = null): Promise<void> {
+    const cryptoToFiatPipe = new CryptoToFiatPipe(this.protocolService)
+    wallets = wallets.filter((wallet) => wallet.status === AirGapWalletStatus.ACTIVE)
+    const failedNames: Set<string> = new Set()
+
+    let runningTotal = new BigNumber(0)
+
+    await Promise.all(
+      wallets.map(async (wallet) => {
+        try {
+          if (wallet.getCurrentMarketPrice() === undefined || wallet.getCurrentMarketPrice()?.isNaN()) {
+            await wallet.fetchCurrentMarketPrice()
+          }
+
+          const fiatValue = await cryptoToFiatPipe.transform(wallet.getCurrentBalance(), {
+            protocolIdentifier: wallet.protocol.identifier,
+            currentMarketPrice: wallet.getCurrentMarketPrice()
+          })
+
+          if (fiatValue !== '') {
+            runningTotal = runningTotal.plus(fiatValue)
+            this.ngZone.run(() => {
+              this.total = runningTotal.toNumber()
+              this.cdr.detectChanges()
+            })
+          } else {
+            failedNames.add(wallet.protocol.name)
+          }
+        } catch {
+          failedNames.add(wallet.protocol.name)
+        }
+      })
+    )
+
+    if (failedNames.size > 0) {
+      const existing = new Set(this.syncWarningNames)
+      failedNames.forEach((n) => existing.add(n))
+      this.syncWarningNames = [...existing]
+    }
+
+    this.total = runningTotal.toNumber()
 
     if (refresher) {
       refresher.complete()

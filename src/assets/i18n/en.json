@@ -123,7 +123,8 @@
     "flip-card": {
       "front-title": "Total Balance",
       "back-title": "Turn your device into a true hardware wallet"
-    }
+    },
+    "sync-warning": "Total balance may be incomplete"
   },
   "account-add": {
     "featured": "Featured",
